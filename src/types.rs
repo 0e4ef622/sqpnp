@@ -39,6 +39,7 @@ impl SolverParameters {
     pub const DEFAULT_POINT_VARIANCE_THRESHOLD: f64 = 1e-5;
 }
 
+#[derive(Default)]
 pub struct SQPSolution {
     /// Actual matrix upon convergence
     pub r: SMatrix<f64, 9, 1>,
