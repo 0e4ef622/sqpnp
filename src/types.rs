@@ -1,4 +1,4 @@
-use nalgebra::{Matrix2x1, Matrix3x1, SMatrix};
+use nalgebra::{Matrix2x1, Matrix3x1, SMatrix, Const};
 
 pub type _Projection = Matrix2x1<f64>;
 pub type _Point = Matrix3x1<f64>;
@@ -39,7 +39,24 @@ impl SolverParameters {
     pub const DEFAULT_POINT_VARIANCE_THRESHOLD: f64 = 1e-5;
 }
 
-#[derive(Default)]
+impl Default for SolverParameters {
+    fn default() -> Self {
+        Self {
+            rank_tolerance: Self::DEFAULT_RANK_TOLERANCE,
+            sqp_squared_tolerance: Self::DEFAULT_SQP_SQUARED_TOLERANCE,
+            sqp_det_threshold: Self::DEFAULT_SQP_DET_THRESHOLD,
+            sqp_max_iteration: Self::DEFAULT_SQP_MAX_ITERATION,
+            omega_nullspace_method: Self::DEFAULT_OMEGA_NULLSPACE_METHOD,
+            nearest_rotation_method: Self::DEFAULT_NEAREST_ROTATION_METHOD,
+            orthogonality_squared_error_threshold: Self::DEFAULT_ORTHOGONALITY_SQUARED_ERROR_THRESHOLD,
+            equal_vectors_squared_diff: Self::DEFAULT_EQUAL_VECTORS_SQUARED_DIFF,
+            equal_squared_errors_diff: Self::DEFAULT_EQUAL_SQUARED_ERRORS_DIFF,
+            point_variance_threshold: Self::DEFAULT_POINT_VARIANCE_THRESHOLD,
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
 pub struct SQPSolution {
     /// Actual matrix upon convergence
     pub r: SMatrix<f64, 9, 1>,
@@ -52,9 +69,9 @@ pub struct SQPSolution {
 
 impl SQPSolution {
     pub fn print(&self) {
-        println!("r_hat: {:?}", self.r_hat);
-        println!("t: {:?}", self.t);
-        println!("squared error: {:.5}", self.sq_error);
+        println!("r_hat: {:.8}", self.r_hat.reshape_generic(Const::<3>, Const::<3>).transpose());
+        println!("t: {:.8}", self.t);
+        println!("squared error: {:.5e}", self.sq_error);
         println!("number of SQP iterations: {}", self.num_iterations);
     }
 }

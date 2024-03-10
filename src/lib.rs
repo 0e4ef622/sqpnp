@@ -500,13 +500,3 @@ fn OrthogonalityError(a: &SMatrix<f64, 9, 1>) -> f64 {
     return (sq_norm_a1 - 1.)*(sq_norm_a1 - 1.) + (sq_norm_a2 - 1.)*(sq_norm_a2 - 1.) + (sq_norm_a3 - 1.)*(sq_norm_a3 - 1.) +
     2.*( dot_a1a2*dot_a1a2 + dot_a1a3*dot_a1a3 + dot_a2a3*dot_a2a3 );
 }
-
-// Compute the 3D null space (N) and 6D normal space (H) of the constraint Jacobian 
-// at a 9D vector r (not necessarilly a rotation-yet it should be rank-3)
-// fn RowAndNullSpace(
-//     const Eigen::Matrix<double, 9, 1>& r, 
-//     Eigen::Matrix<double, 9, 6>& H, 
-//     Eigen::Matrix<double, 9, 3>& N,
-//     Eigen::Matrix<double, 6, 6>& K,
-//     const double& norm_threshold = 0.1,
-// );
