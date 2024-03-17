@@ -1,7 +1,5 @@
-#![allow(non_snake_case)]
-
-use nalgebra::{SMatrix, Vector2, Point3, Matrix3, Matrix3x1, Const};
-use types::{_Projection, _Point, SolverParameters, SQPSolution, OmegaNullspaceMethod};
+use nalgebra::{SMatrix, Vector2, Matrix3, Matrix3x1, Const, Vector3};
+use types::{SolverParameters, SQPSolution, OmegaNullspaceMethod};
 
 use crate::types::NearestRotationMethod;
 
@@ -10,81 +8,77 @@ mod sqpnp;
 
 pub const SQRT3: f64 = 1.732050807568877293527446341505872367_f64;
 
-pub struct PnpSolver {
-    projections_: Vec<_Projection>,
-    points_: Vec<_Point>,
-    weights_: Vec<f64>,
-    parameters_: SolverParameters,
+#[allow(non_snake_case)]
+pub struct PnpSolver<'input> {
+    projections: &'input [Vector2<f64>],
+    points: &'input [Vector3<f64>],
+    weights: &'input [f64],
+    parameters: SolverParameters,
 
-    Omega_: SMatrix<f64, 9, 9>,
+    omega: SMatrix<f64, 9, 9>,
 
-    s_: SMatrix<f64, 9, 1>,
-    U_: SMatrix<f64, 9, 9>,
-    P_: SMatrix<f64, 3, 9>,
-    point_mean_: Matrix3x1<f64>,
+    s: SMatrix<f64, 9, 1>,
+    U: SMatrix<f64, 9, 9>,
+    P: SMatrix<f64, 3, 9>,
+    point_mean: Vector3<f64>,
 
-    num_null_vectors_: i32,
-    solutions_: [SQPSolution; 18],
-    num_solutions_: usize,
-    NearestRotationMatrix: fn(&SMatrix<f64, 9, 1>, &mut SMatrix<f64, 9, 1>),
+    num_null_vectors: i32,
+    solutions: [SQPSolution; 18],
+    num_solutions: usize,
+    nearest_rotation_matrix: fn(&SMatrix<f64, 9, 1>, &mut SMatrix<f64, 9, 1>),
 }
 
-impl PnpSolver {
-    pub fn Omega(&self) -> &SMatrix<f64, 9, 9> {
-        &self.Omega_
+impl<'input> PnpSolver<'input> {
+    pub fn omega(&self) -> &SMatrix<f64, 9, 9> {
+        &self.omega
     }
-    pub fn EigenVectors(&self) -> &SMatrix<f64, 9, 9> {
-        &self.U_
+    pub fn eigen_vectors(&self) -> &SMatrix<f64, 9, 9> {
+        &self.U
     }
-    pub fn EigenValues(&self) -> &SMatrix<f64, 9, 1> {
-        &self.s_
+    pub fn eigen_values(&self) -> &SMatrix<f64, 9, 1> {
+        &self.s
     }
-    pub fn NullSpaceDimension(&self) -> i32 {
-        self.num_null_vectors_
+    pub fn null_space_dimension(&self) -> i32 {
+        self.num_null_vectors
     }
-    pub fn NumberOfSolutions(&self) -> usize {
-        self.num_solutions_
+    pub fn number_of_solutions(&self) -> usize {
+        self.num_solutions
     }
-    pub fn SolutionPtr(&self, index: usize) -> Option<&SQPSolution> {
-        if index >= self.num_solutions_ {
+    pub fn solution_ptr(&self, index: usize) -> Option<&SQPSolution> {
+        if index >= self.num_solutions {
             None
         } else {
-            Some(&self.solutions_[index])
+            Some(&self.solutions[index])
         }
     }
 
     /// Return average reprojection errors
-    pub fn AverageSquaredProjectionErrors(&self) -> Vec<f64> {
-        (0..self.num_solutions_).map(|i| {
-            self.AverageSquaredProjectionError(i)
+    pub fn average_squared_projection_errors(&self) -> Vec<f64> {
+        (0..self.num_solutions).map(|i| {
+            self.average_squared_projection_error(i)
         }).collect()
     }
 
     /// Constructor (initializes Omega, P and U, s, i.e. the decomposition of Omega)
+    #[allow(non_snake_case)]
     pub fn new(
-        _3dpoints: &[Point3<f64>],
-        _projections: &[Vector2<f64>],
-        _weights: Vec<f64>,
-        _parameters: SolverParameters,
+        points: &'input [Vector3<f64>],
+        projections: &'input [Vector2<f64>],
+        weights: Option<&'input [f64]>,
+        parameters: SolverParameters,
     ) -> Option<Self> {
-        let n = _3dpoints.len();
-        if n != _projections.len() || n < 3 {
+        let n = points.len();
+        if n != projections.len() || n < 3 {
             return None;
         }
 
-        let weights_ = if !_weights.is_empty() {
-            if n != _weights.len() {
-                return None;
-            }
-            _weights
-        } else {
-            vec![1.0; n]
-        };
+        let weights = weights.unwrap_or_else(|| &[]);
+        if weights.len() != 0 && weights.len() != n {
+            return None;
+        }
 
-        let mut points_ = Vec::<_Point>::with_capacity(n);
-        let mut projections_ = Vec::<_Projection>::with_capacity(n);
-        let mut num_null_vectors_ = -1;
-        let mut Omega_ = SMatrix::<f64, 9, 9>::zeros();
+        let mut num_null_vectors = -1;
+        let mut omega = SMatrix::<f64, 9, 9>::zeros();
         let mut sum_wx @ mut sum_wy @ mut sum_wx2_plus_wy2 @ mut sum_w = 0.0;
 
         let mut sum_wX @ mut sum_wY @ mut sum_wZ = 0.0;
@@ -92,27 +86,25 @@ impl PnpSolver {
         let mut QA = SMatrix::<f64, 3, 9>::zeros();
 
         for i in 0..n {
-            let w = weights_[i];
-            points_.push(_3dpoints[i].coords);
-            projections_.push(_projections[i]);
+            let w = *weights.get(i).unwrap_or(&1.0);
 
             if w == 0.0 {
                 continue;
             }
 
-            let proj_ = &projections_[i];
-            let wx = proj_[0] * w;
-            let wy = proj_[1] * w;
-            let wsq_norm_m = w*proj_.norm_squared();
+            let proj = &projections[i];
+            let wx = proj[0] * w;
+            let wy = proj[1] * w;
+            let wsq_norm_m = w*proj.norm_squared();
             sum_wx += wx;
             sum_wy += wy;
             sum_wx2_plus_wy2 += wsq_norm_m;
             sum_w += w;
 
-            let pt_ = &points_[i];
-            let X = pt_[0];
-            let Y = pt_[1];
-            let Z = pt_[2];
+            let pt = &points[i];
+            let X = pt[0];
+            let Y = pt[1];
+            let Z = pt[2];
             let wX = w * X;
             let wY = w * Y;
             let wZ = w * Z;
@@ -129,27 +121,27 @@ impl PnpSolver {
             let Z2 = Z*Z;
 
             // a. Block (0:2, 0:2) populated by Mi*Mi'. NOTE: Only upper triangle
-            Omega_[(0, 0)] += w*X2;
-            Omega_[(0, 1)] += w*XY;
-            Omega_[(0, 2)] += w*XZ;
-            Omega_[(1, 1)] += w*Y2;
-            Omega_[(1, 2)] += w*YZ;
-            Omega_[(2, 2)] += w*Z2;
+            omega[(0, 0)] += w*X2;
+            omega[(0, 1)] += w*XY;
+            omega[(0, 2)] += w*XZ;
+            omega[(1, 1)] += w*Y2;
+            omega[(1, 2)] += w*YZ;
+            omega[(2, 2)] += w*Z2;
 
             // b. Block (0:2, 6:8) populated by -x*Mi*Mi'. NOTE: Only upper triangle
-            Omega_[(0, 6)] += -wx*X2; Omega_[(0, 7)] += -wx*XY; Omega_[(0, 8)] += -wx*XZ;
-                                      Omega_[(1, 7)] += -wx*Y2; Omega_[(1, 8)] += -wx*YZ;
-                                                                Omega_[(2, 8)] += -wx*Z2;
+            omega[(0, 6)] += -wx*X2; omega[(0, 7)] += -wx*XY; omega[(0, 8)] += -wx*XZ;
+                                     omega[(1, 7)] += -wx*Y2; omega[(1, 8)] += -wx*YZ;
+                                                              omega[(2, 8)] += -wx*Z2;
 
             // c. Block (3:5, 6:8) populated by -y*Mi*Mi'. NOTE: Only upper triangle
-            Omega_[(3, 6)] += -wy*X2; Omega_[(3, 7)] += -wy*XY; Omega_[(3, 8)] += -wy*XZ;
-                                      Omega_[(4, 7)] += -wy*Y2; Omega_[(4, 8)] += -wy*YZ;
-                                                                Omega_[(5, 8)] += -wy*Z2;
+            omega[(3, 6)] += -wy*X2; omega[(3, 7)] += -wy*XY; omega[(3, 8)] += -wy*XZ;
+                                     omega[(4, 7)] += -wy*Y2; omega[(4, 8)] += -wy*YZ;
+                                                              omega[(5, 8)] += -wy*Z2;
                                                             
             // d. Block (6:8, 6:8) populated by (x^2+y^2)*Mi*Mi'. NOTE: Only upper triangle
-            Omega_[(6, 6)] += wsq_norm_m*X2; Omega_[(6, 7)] += wsq_norm_m*XY; Omega_[(6, 8)] += wsq_norm_m*XZ;
-                                             Omega_[(7, 7)] += wsq_norm_m*Y2; Omega_[(7, 8)] += wsq_norm_m*YZ;
-                                                                              Omega_[(8, 8)] += wsq_norm_m*Z2;
+            omega[(6, 6)] += wsq_norm_m*X2; omega[(6, 7)] += wsq_norm_m*XY; omega[(6, 8)] += wsq_norm_m*XZ;
+                                            omega[(7, 7)] += wsq_norm_m*Y2; omega[(7, 8)] += wsq_norm_m*YZ;
+                                                                            omega[(8, 8)] += wsq_norm_m*Z2;
 
             // Accumulating Qi*Ai in QA.
             // Note that certain pairs of elements are equal, so we save some operations by filling them outside the loop
@@ -168,24 +160,24 @@ impl PnpSolver {
         QA[(2, 3)] = QA[(1, 6)]; QA[(2, 4)] = QA[(1, 7)]; QA[(2, 5)] = QA[(1, 8)];
 
         // Fill-in lower triangles of off-diagonal blocks (0:2, 6:8), (3:5, 6:8) and (6:8, 6:8)
-        Omega_[(1, 6)] = Omega_[(0, 7)]; Omega_[(2, 6)] = Omega_[(0, 8)]; Omega_[(2, 7)] = Omega_[(1, 8)];
-        Omega_[(4, 6)] = Omega_[(3, 7)]; Omega_[(5, 6)] = Omega_[(3, 8)]; Omega_[(5, 7)] = Omega_[(4, 8)];
-        Omega_[(7, 6)] = Omega_[(6, 7)]; Omega_[(8, 6)] = Omega_[(6, 8)]; Omega_[(8, 7)] = Omega_[(7, 8)];
+        omega[(1, 6)] = omega[(0, 7)]; omega[(2, 6)] = omega[(0, 8)]; omega[(2, 7)] = omega[(1, 8)];
+        omega[(4, 6)] = omega[(3, 7)]; omega[(5, 6)] = omega[(3, 8)]; omega[(5, 7)] = omega[(4, 8)];
+        omega[(7, 6)] = omega[(6, 7)]; omega[(8, 6)] = omega[(6, 8)]; omega[(8, 7)] = omega[(7, 8)];
 
         // Fill-in upper triangle of block (3:5, 3:5)
-        Omega_[(3, 3)] = Omega_[(0, 0)]; Omega_[(3, 4)] = Omega_[(0, 1)]; Omega_[(3, 5)] = Omega_[(0, 2)];
-        Omega_[(4, 4)] = Omega_[(1, 1)]; Omega_[(4, 5)] = Omega_[(1, 2)];
-        Omega_[(5, 5)] = Omega_[(2, 2)];
+        omega[(3, 3)] = omega[(0, 0)]; omega[(3, 4)] = omega[(0, 1)]; omega[(3, 5)] = omega[(0, 2)];
+        omega[(4, 4)] = omega[(1, 1)]; omega[(4, 5)] = omega[(1, 2)];
+        omega[(5, 5)] = omega[(2, 2)];
 
         // Fill lower triangle of Omega; elements (7, 6), (8, 6) & (8, 7) have already been assigned above
-        Omega_[(1, 0)] = Omega_[(0, 1)];
-        Omega_[(2, 0)] = Omega_[(0, 2)]; Omega_[(2, 1)] = Omega_[(1, 2)];
-        Omega_[(3, 0)] = Omega_[(0, 3)]; Omega_[(3, 1)] = Omega_[(1, 3)]; Omega_[(3, 2)] = Omega_[(2, 3)];
-        Omega_[(4, 0)] = Omega_[(0, 4)]; Omega_[(4, 1)] = Omega_[(1, 4)]; Omega_[(4, 2)] = Omega_[(2, 4)]; Omega_[(4, 3)] = Omega_[(3, 4)];
-        Omega_[(5, 0)] = Omega_[(0, 5)]; Omega_[(5, 1)] = Omega_[(1, 5)]; Omega_[(5, 2)] = Omega_[(2, 5)]; Omega_[(5, 3)] = Omega_[(3, 5)]; Omega_[(5, 4)] = Omega_[(4, 5)];
-        Omega_[(6, 0)] = Omega_[(0, 6)]; Omega_[(6, 1)] = Omega_[(1, 6)]; Omega_[(6, 2)] = Omega_[(2, 6)]; Omega_[(6, 3)] = Omega_[(3, 6)]; Omega_[(6, 4)] = Omega_[(4, 6)]; Omega_[(6, 5)] = Omega_[(5, 6)];
-        Omega_[(7, 0)] = Omega_[(0, 7)]; Omega_[(7, 1)] = Omega_[(1, 7)]; Omega_[(7, 2)] = Omega_[(2, 7)]; Omega_[(7, 3)] = Omega_[(3, 7)]; Omega_[(7, 4)] = Omega_[(4, 7)]; Omega_[(7, 5)] = Omega_[(5, 7)];
-        Omega_[(8, 0)] = Omega_[(0, 8)]; Omega_[(8, 1)] = Omega_[(1, 8)]; Omega_[(8, 2)] = Omega_[(2, 8)]; Omega_[(8, 3)] = Omega_[(3, 8)]; Omega_[(8, 4)] = Omega_[(4, 8)]; Omega_[(8, 5)] = Omega_[(5, 8)];
+        omega[(1, 0)] = omega[(0, 1)];
+        omega[(2, 0)] = omega[(0, 2)]; omega[(2, 1)] = omega[(1, 2)];
+        omega[(3, 0)] = omega[(0, 3)]; omega[(3, 1)] = omega[(1, 3)]; omega[(3, 2)] = omega[(2, 3)];
+        omega[(4, 0)] = omega[(0, 4)]; omega[(4, 1)] = omega[(1, 4)]; omega[(4, 2)] = omega[(2, 4)]; omega[(4, 3)] = omega[(3, 4)];
+        omega[(5, 0)] = omega[(0, 5)]; omega[(5, 1)] = omega[(1, 5)]; omega[(5, 2)] = omega[(2, 5)]; omega[(5, 3)] = omega[(3, 5)]; omega[(5, 4)] = omega[(4, 5)];
+        omega[(6, 0)] = omega[(0, 6)]; omega[(6, 1)] = omega[(1, 6)]; omega[(6, 2)] = omega[(2, 6)]; omega[(6, 3)] = omega[(3, 6)]; omega[(6, 4)] = omega[(4, 6)]; omega[(6, 5)] = omega[(5, 6)];
+        omega[(7, 0)] = omega[(0, 7)]; omega[(7, 1)] = omega[(1, 7)]; omega[(7, 2)] = omega[(2, 7)]; omega[(7, 3)] = omega[(3, 7)]; omega[(7, 4)] = omega[(4, 7)]; omega[(7, 5)] = omega[(5, 7)];
+        omega[(8, 0)] = omega[(0, 8)]; omega[(8, 1)] = omega[(1, 8)]; omega[(8, 2)] = omega[(2, 8)]; omega[(8, 3)] = omega[(3, 8)]; omega[(8, 4)] = omega[(4, 8)]; omega[(8, 5)] = omega[(5, 8)];
 
 
         // Q = Sum( wi*Qi ) = Sum( [ wi, 0, -wi*xi; 0, 1, -wi*yi; -wi*xi, -wi*yi, wi*(xi^2 + yi^2)] )
@@ -198,17 +190,17 @@ impl PnpSolver {
         // Qinv = inv( Q ) = inv( Sum( Qi) )
         // let Qinv = Q.try_inverse().unwrap();
         let mut Qinv = SMatrix::<f64, 3, 3>::zeros();
-        InvertSymmetric3x3(Q, &mut Qinv);
+        invert_symmetric_3x3(Q, &mut Qinv);
 
         // Compute P = -inv( Sum(wi*Qi) ) * Sum( wi*Qi*Ai ) = -Qinv * QA
-        let P_ = -Qinv * QA;
+        let P = -Qinv * QA;
         // Complete Omega (i.e., Omega = Sum(A'*Qi*A') + Sum(Qi*Ai)'*P = Sum(A'*Qi*A') + Sum(Qi*Ai)'*inv(Sum(Qi))*Sum( Qi*Ai) 
-        Omega_ +=  QA.transpose()*P_;
+        omega +=  QA.transpose()*P;
 
         // Finally, decompose Omega with the chosen method
-        let U_;
-        let s_;
-        match _parameters.omega_nullspace_method {
+        let U;
+        let s;
+        match parameters.omega_nullspace_method {
             OmegaNullspaceMethod::Rrqr => {
                 // Rank revealing QR nullspace computation. This is slightly less accurate compared to SVD but x2 faster
                 // Eigen::FullPivHouseholderQR<Eigen::Matrix<double, 9, 9> > rrqr(Omega_);
@@ -221,91 +213,91 @@ impl PnpSolver {
             OmegaNullspaceMethod::Svd => {
                 // SVD-based nullspace computation. This is the most accurate but slowest option
                 // Eigen::JacobiSVD<Eigen::Matrix<double, 9, 9>> svd(Omega_, Eigen::ComputeFullU);
-                let svd = Omega_.svd(true, false);
-                U_ = svd.u.unwrap();
-                s_ = svd.singular_values;
+                let svd = omega.svd(true, false);
+                U = svd.u.unwrap();
+                s = svd.singular_values;
             }
         }
 
         // Find dimension of null space; the check guards against overly large rank_tolerance
-        while 7 - num_null_vectors_ >= 0 && s_[(7 - num_null_vectors_) as usize] < _parameters.rank_tolerance {
-            num_null_vectors_ += 1;
+        while 7 - num_null_vectors >= 0 && s[(7 - num_null_vectors) as usize] < parameters.rank_tolerance {
+            num_null_vectors += 1;
         }
 
         // Dimension of null space of Omega must be <= 6
-        if num_null_vectors_ > 6 {
+        if num_null_vectors > 6 {
             return None;
         }
-        num_null_vectors_ += 1;
+        num_null_vectors += 1;
 
         // 3D point weighted mean (for quick cheirality checks)
         let inv_sum_w = 1.0 / sum_w;
-        let point_mean_ = Matrix3x1::new(sum_wX*inv_sum_w, sum_wY*inv_sum_w, sum_wZ*inv_sum_w);
+        let point_mean = Matrix3x1::new(sum_wX*inv_sum_w, sum_wY*inv_sum_w, sum_wZ*inv_sum_w);
 
         // Assign nearest rotation method
-        let NearestRotationMatrix = match _parameters.nearest_rotation_method {
-            NearestRotationMethod::Foam => NearestRotationMatrix_FOAM,
-            NearestRotationMethod::Svd => NearestRotationMatrix_SVD,
+        let nearest_rotation_matrix = match parameters.nearest_rotation_method {
+            NearestRotationMethod::Foam => nearest_rotation_matrix_foam,
+            NearestRotationMethod::Svd => nearest_rotation_matrix_svd,
         };
 
         Some(Self {
-            projections_,
-            points_,
-            weights_,
-            parameters_: _parameters,
-            Omega_,
-            s_,
-            U_,
-            P_,
-            point_mean_,
-            num_null_vectors_,
-            solutions_: Default::default(),
-            num_solutions_: 0,
-            NearestRotationMatrix,
+            projections,
+            points,
+            weights,
+            parameters,
+            omega,
+            s,
+            U,
+            P,
+            point_mean,
+            num_null_vectors,
+            solutions: Default::default(),
+            num_solutions: 0,
+            nearest_rotation_matrix,
         })
     }
 }
 
-impl PnpSolver {
-    fn AverageSquaredProjectionError(&self, index: usize) -> f64 {
+impl PnpSolver<'_> {
+    fn average_squared_projection_error(&self, index: usize) -> f64 {
         let mut avg = 0.0;
-        let r = &self.solutions_[index].r_hat;
-        let t = &self.solutions_[index].t;
+        let r = &self.solutions[index].r_hat;
+        let t = &self.solutions[index].t;
 
-        for i in 0..self.points_.len() {
-            let M = &self.points_[i];
-            let Xc = r[0]*M[0] + r[1]*M[1] + r[2]*M[2] + t[0];
-            let Yc = r[3]*M[0] + r[4]*M[1] + r[5]*M[2] + t[1];
-            let inv_Zc = 1.0 / ( r[6]*M[0] + r[7]*M[1] + r[8]*M[2] + t[2] );
+        for i in 0..self.points.len() {
+            let m = &self.points[i];
+            let x = r[0]*m[0] + r[1]*m[1] + r[2]*m[2] + t[0];
+            let y = r[3]*m[0] + r[4]*m[1] + r[5]*m[2] + t[1];
+            let inv_z = 1.0 / ( r[6]*m[0] + r[7]*m[1] + r[8]*m[2] + t[2] );
 
-            let m = &self.projections_[i];
-            let dx = Xc*inv_Zc - m[0];
-            let dy = Yc*inv_Zc - m[1];
+            let m = &self.projections[i];
+            let dx = x*inv_z - m[0];
+            let dy = y*inv_z - m[1];
             avg += dx*dx + dy*dy;
         }
 
-        return avg / self.points_.len() as f64;
+        return avg / self.points.len() as f64;
     }
 
     /// Test cheirality on the mean point for a given solution
-    fn TestPositiveDepth(&self, solution: &SQPSolution) -> bool {
+    fn test_positive_depth(&self, solution: &SQPSolution) -> bool {
         let r = &solution.r_hat;
         let t = &solution.t;
-        let M = &self.point_mean_;
-        return r[6]*M[0] + r[7]*M[1] + r[8]*M[2] + t[2] > 0.;
+        let m = &self.point_mean;
+        return r[6]*m[0] + r[7]*m[1] + r[8]*m[2] + t[2] > 0.;
     }
 
     /// Test cheirality on the majority of points for a given solution
-    fn TestPositiveMajorityDepths(&self, solution: &SQPSolution) -> bool {
+    fn test_positive_majority_depths(&self, solution: &SQPSolution) -> bool {
         let r = &solution.r_hat;
         let t = &solution.t;
         let mut npos = 0;
         let mut nneg = 0;
 
-        for i in 0..self.points_.len() {
-            if self.weights_[i] == 0.0 { continue; }
-            let M = &self.points_[i];
-            if r[6]*M[0] + r[7]*M[1] + r[8]*M[2] + t[2] > 0. {
+        for i in 0..self.points.len() {
+            if *self.weights.get(i).unwrap_or(&1.0) == 0.0 { continue; }
+            let m = &self.points[i];
+            if r[6]*m[0] + r[7]*m[1] + r[8]*m[2] + t[2] > 0. {
                 npos += 1;
             } else {
                 nneg += 1;
@@ -318,13 +310,15 @@ impl PnpSolver {
 
 
 /// Determinant of 3x3 matrix stored as a 9x1 vector in *row-major* order
-fn Determinant9x1(r: &SMatrix<f64, 9, 1>) -> f64 {
+fn determinant_9x1(r: &SMatrix<f64, 9, 1>) -> f64 {
     r[0]*r[4]*r[8] + r[1]*r[5]*r[6] + r[2]*r[3]*r[7] - r[6]*r[4]*r[2] - r[7]*r[5]*r[0] - r[8]*r[3]*r[1]
 }
 
 
 /// Invert a 3x3 symmetric matrix (using low triangle values only)
-fn InvertSymmetric3x3(Q: SMatrix<f64, 3, 3>,
+#[allow(non_snake_case)]
+fn invert_symmetric_3x3(
+    Q: SMatrix<f64, 3, 3>,
     Qinv: &mut SMatrix<f64, 3, 3>,
 ) -> bool {
     let det_threshold = 1e-10;
@@ -368,7 +362,8 @@ fn InvertSymmetric3x3(Q: SMatrix<f64, 3, 3>,
 
 /// Simple SVD - based nearest rotation matrix. Argument should be a *row-major* matrix representation.
 /// Returns a row-major vector representation of the nearest rotation matrix.
-fn NearestRotationMatrix_SVD(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>) {
+#[allow(non_snake_case)]
+fn nearest_rotation_matrix_svd(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>) {
     let E = e.reshape_generic(Const::<3>, Const::<3>);
     let svd = E.svd(true, true);
     let detUV = svd.u.unwrap().determinant() * svd.v_t.unwrap().determinant();
@@ -391,7 +386,8 @@ fn NearestRotationMatrix_SVD(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>)
 ///  Institute of Computer Science, Foundation for Research & Technology - Hellas
 ///  Heraklion, Crete, Greece.
 /// 
-fn NearestRotationMatrix_FOAM(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>) {
+#[allow(non_snake_case)]
+fn nearest_rotation_matrix_foam(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>) {
     let mut i;
     let B = e;
     let (mut l, mut lprev, detB, Bsq, adjBsq);
@@ -400,7 +396,7 @@ fn NearestRotationMatrix_FOAM(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>
     // det(B)
     detB=B[0]*B[4]*B[8] - B[0]*B[5]*B[7] - B[1]*B[3]*B[8] + B[2]*B[3]*B[7] + B[1]*B[6]*B[5] - B[2]*B[6]*B[4];
     if detB.abs() < 1E-04 { // singular, let SVD handle it
-        NearestRotationMatrix_SVD(e, r);
+        nearest_rotation_matrix_svd(e, r);
         return;
     }
 
@@ -489,7 +485,7 @@ fn NearestRotationMatrix_FOAM(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 1>
 
 /// Produce a distance from being orthogonal for a random 3x3 matrix
 /// Matrix is provided as a vector
-fn OrthogonalityError(a: &SMatrix<f64, 9, 1>) -> f64 {
+fn orthogonality_error(a: &SMatrix<f64, 9, 1>) -> f64 {
     let sq_norm_a1 = a[0]*a[0] + a[1]*a[1] + a[2]*a[2];
     let sq_norm_a2 = a[3]*a[3] + a[4]*a[4] + a[5]*a[5];
     let sq_norm_a3 = a[6]*a[6] + a[7]*a[7] + a[8]*a[8];

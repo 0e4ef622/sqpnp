@@ -1,7 +1,4 @@
-use nalgebra::{Matrix2x1, Matrix3x1, SMatrix, Const};
-
-pub type _Projection = Matrix2x1<f64>;
-pub type _Point = Matrix3x1<f64>;
+use nalgebra::{SMatrix, Const, Vector3};
 
 pub enum OmegaNullspaceMethod {
     Rrqr,
@@ -62,7 +59,7 @@ pub struct SQPSolution {
     pub r: SMatrix<f64, 9, 1>,
     /// "Clean" (nearest) rotation matrix
     pub r_hat: SMatrix<f64, 9, 1>,
-    pub t: Matrix3x1<f64>,
+    pub t: Vector3<f64>,
     pub num_iterations: i32,
     pub sq_error: f64,
 }

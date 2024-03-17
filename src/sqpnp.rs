@@ -1,36 +1,36 @@
 use nalgebra::SMatrix;
 
-use crate::{PnpSolver, types::SQPSolution, SQRT3, OrthogonalityError, Determinant9x1, InvertSymmetric3x3};
+use crate::{PnpSolver, types::SQPSolution, SQRT3, orthogonality_error, determinant_9x1, invert_symmetric_3x3};
 
 
-impl PnpSolver {
-    fn HandleSolution(&mut self, solution: &mut SQPSolution, min_sq_error: &mut f64) {
-        let cheirok = self.TestPositiveDepth( solution ) || self.TestPositiveMajorityDepths ( solution ); // check the majority if the check with centroid fails
+impl PnpSolver<'_> {
+    fn handle_solution(&mut self, solution: &mut SQPSolution, min_sq_error: &mut f64) {
+        let cheirok = self.test_positive_depth( solution ) || self.test_positive_majority_depths ( solution ); // check the majority if the check with centroid fails
         if cheirok {
-            solution.sq_error = ( self.Omega_ * solution.r_hat ).dot( &solution.r_hat );
-            if ( *min_sq_error - solution.sq_error ).abs() > self.parameters_.equal_squared_errors_diff {
+            solution.sq_error = ( self.omega * solution.r_hat ).dot( &solution.r_hat );
+            if ( *min_sq_error - solution.sq_error ).abs() > self.parameters.equal_squared_errors_diff {
                 if *min_sq_error > solution.sq_error
                 {
                     *min_sq_error = solution.sq_error;
-                    self.solutions_[0] = *solution;
-                    self.num_solutions_ = 1;
+                    self.solutions[0] = *solution;
+                    self.num_solutions = 1;
                 }
             } else { // look for a solution that's almost equal to this
                 let mut found = false;
-                for i in 0..self.num_solutions_ {
-                    if ( self.solutions_[i].r_hat - solution.r_hat ).norm_squared() < self.parameters_.equal_vectors_squared_diff
+                for i in 0..self.num_solutions {
+                    if ( self.solutions[i].r_hat - solution.r_hat ).norm_squared() < self.parameters.equal_vectors_squared_diff
                     {
-                        if self.solutions_[i].sq_error > solution.sq_error
+                        if self.solutions[i].sq_error > solution.sq_error
                         {
-                            self.solutions_[i] = *solution;
+                            self.solutions[i] = *solution;
                         }
                         found = true;
                         break;
                     }
                 }
                 if !found {
-                    self.solutions_[self.num_solutions_] = *solution;
-                    self.num_solutions_ += 1;
+                    self.solutions[self.num_solutions] = *solution;
+                    self.num_solutions += 1;
                 }
                 if *min_sq_error > solution.sq_error { *min_sq_error = solution.sq_error; }
             }
@@ -38,55 +38,55 @@ impl PnpSolver {
     }
 
     /// Solve the PnP 
-    pub fn Solve(&mut self) -> bool {
+    pub fn solve(&mut self) -> bool {
         let mut min_sq_error = f64::MAX;
-        let num_eigen_points = if self.num_null_vectors_ > 0 { self.num_null_vectors_ as usize } else { 1 };
+        let num_eigen_points = if self.num_null_vectors > 0 { self.num_null_vectors as usize } else { 1 };
         // clear solutions
-        self.num_solutions_ = 0;
+        self.num_solutions = 0;
 
         // for (int i = 9 - num_eigen_points; i < 9; i++) 
         for i in 9-num_eigen_points .. 9 {
             // NOTE: No need to scale by sqrt(3) here, but better be there for other computations (i.e., orthogonality test)
-            let e = SQRT3 * self.U_.column(i);
-            let orthogonality_sq_error = OrthogonalityError(&e);
+            let e = SQRT3 * self.U.column(i);
+            let orthogonality_sq_error = orthogonality_error(&e);
             // Find nearest rotation vector
             let mut solution = [SQPSolution::default(); 2];
 
             // Avoid SQP if e is orthogonal
-            if orthogonality_sq_error < self.parameters_.orthogonality_squared_error_threshold {
-                solution[0].r_hat = Determinant9x1(&e) * e;
-                solution[0].t = self.P_*solution[0].r_hat;
+            if orthogonality_sq_error < self.parameters.orthogonality_squared_error_threshold {
+                solution[0].r_hat = determinant_9x1(&e) * e;
+                solution[0].t = self.P*solution[0].r_hat;
                 solution[0].num_iterations = 0;
 
-                self.HandleSolution( &mut solution[0], &mut min_sq_error );
+                self.handle_solution( &mut solution[0], &mut min_sq_error );
             } else {
-                (self.NearestRotationMatrix)( &e, &mut solution[0].r );
-                solution[0] = self.RunSQP( &solution[0].r );
-                solution[0].t = self.P_*solution[0].r_hat;
-                self.HandleSolution( &mut solution[0] , &mut min_sq_error );
+                (self.nearest_rotation_matrix)( &e, &mut solution[0].r );
+                solution[0] = self.run_sqp( &solution[0].r );
+                solution[0].t = self.P*solution[0].r_hat;
+                self.handle_solution( &mut solution[0] , &mut min_sq_error );
 
-                (self.NearestRotationMatrix)( &-e, &mut solution[1].r );
-                solution[1] = self.RunSQP( &solution[1].r );
-                solution[1].t = self.P_*solution[1].r_hat;
-                self.HandleSolution( &mut solution[1] , &mut min_sq_error );
+                (self.nearest_rotation_matrix)( &-e, &mut solution[1].r );
+                solution[1] = self.run_sqp( &solution[1].r );
+                solution[1].t = self.P*solution[1].r_hat;
+                self.handle_solution( &mut solution[1] , &mut min_sq_error );
             }
         }
 
         let mut index;
         let mut c = 1;
-        while ({index = 9 - num_eigen_points - c; index} > 0 && min_sq_error > 3. * self.s_[index]) {      
-            let e = self.U_.column(index).into_owned();
+        while {index = 9 - num_eigen_points - c; index} > 0 && min_sq_error > 3. * self.s[index] {
+            let e = self.U.column(index).into_owned();
             let mut solution = [SQPSolution::default(); 2];
 
-            (self.NearestRotationMatrix)( &e, &mut solution[0].r);
-            solution[0] = self.RunSQP( &solution[0].r );
-            solution[0].t = self.P_*solution[0].r_hat;
-            self.HandleSolution( &mut solution[0], &mut min_sq_error );
+            (self.nearest_rotation_matrix)( &e, &mut solution[0].r);
+            solution[0] = self.run_sqp( &solution[0].r );
+            solution[0].t = self.P*solution[0].r_hat;
+            self.handle_solution( &mut solution[0], &mut min_sq_error );
 
-            (self.NearestRotationMatrix)( &-e, &mut solution[1].r);
-            solution[1] = self.RunSQP( &solution[1].r );
-            solution[1].t = self.P_*solution[1].r_hat;
-            self.HandleSolution( &mut solution[1], &mut min_sq_error );
+            (self.nearest_rotation_matrix)( &-e, &mut solution[1].r);
+            solution[1] = self.run_sqp( &solution[1].r );
+            solution[1].t = self.P*solution[1].r_hat;
+            self.handle_solution( &mut solution[1], &mut min_sq_error );
 
             c += 1;
         }
@@ -94,17 +94,16 @@ impl PnpSolver {
         true
     }
 
-    fn RunSQP(&mut self, r0: &SMatrix<f64, 9, 1>) -> SQPSolution {
+    fn run_sqp(&mut self, r0: &SMatrix<f64, 9, 1>) -> SQPSolution {
         let mut r = *r0;
 
         let mut delta_squared_norm = f64::MAX;
         let mut delta = SMatrix::<f64, 9, 1>::zeros();
         let mut step = 0;
 
-        while delta_squared_norm > self.parameters_.sqp_squared_tolerance && step < self.parameters_.sqp_max_iteration
-        {
+        while delta_squared_norm > self.parameters.sqp_squared_tolerance && step < self.parameters.sqp_max_iteration {
             step += 1;
-            self.SolveSQPSystem(&r, &mut delta);
+            self.solve_sqpsystem(&r, &mut delta);
             r += delta;
             delta_squared_norm = delta.norm_squared();
         }
@@ -113,25 +112,22 @@ impl PnpSolver {
         solution.num_iterations = step;
         solution.r = r;
         // clear the estimate and/or flip the matrix sign if necessary
-        let mut det_r = Determinant9x1(&solution.r);
+        let mut det_r = determinant_9x1(&solution.r);
         if det_r < 0.0 {
             solution.r = -r;
             det_r = -det_r;
         }
-        if det_r > self.parameters_.sqp_det_threshold
-        {
-            (self.NearestRotationMatrix)( &solution.r, &mut solution.r_hat );
-        }
-        else
-        {
+        if det_r > self.parameters.sqp_det_threshold {
+            (self.nearest_rotation_matrix)( &solution.r, &mut solution.r_hat );
+        } else {
             solution.r_hat = solution.r;
         }
-
 
         return solution;
     }
 
-    fn SolveSQPSystem(&mut self, r: &SMatrix<f64, 9, 1>, delta: &mut SMatrix<f64, 9, 1>) {
+    #[allow(non_snake_case)]
+    fn solve_sqpsystem(&mut self, r: &SMatrix<f64, 9, 1>, delta: &mut SMatrix<f64, 9, 1>) {
         let sqnorm_r1 = r[0]*r[0] + r[1]*r[1] + r[2]*r[2];
         let sqnorm_r2 = r[3]*r[3] + r[4]*r[4] + r[5]*r[5];
         let sqnorm_r3 = r[6]*r[6] + r[7]*r[7] + r[8]*r[8];
@@ -145,7 +141,7 @@ impl PnpSolver {
         let mut H = SMatrix::<f64, 9, 6>::zeros();  // Row space of J
         let mut JH = SMatrix::<f64, 6, 6>::zeros(); // The lower triangular matrix J*Q
 
-        RowAndNullSpace(r, &mut H, &mut N, &mut JH, None);
+        row_and_null_space(r, &mut H, &mut N, &mut JH, None);
 
         // Great, now if delta = H*x + N*y, we first compute x by solving:
         // 
@@ -175,12 +171,12 @@ impl PnpSolver {
         // Finally, solve for y from W*y = ksi , where matrix W and vector ksi are :
         //
         // W = N'*Omega*N and ksi = -N'*Omega*( r + delta_h );
-        let NtOmega = N.transpose() * self.Omega_ ;
-        let W = NtOmega * N;
+        let nt_omega = N.transpose() * self.omega ;
+        let W = nt_omega * N;
         let mut Winv = SMatrix::zeros();
-        InvertSymmetric3x3(W, &mut Winv); // NOTE: This maybe also analytical with Eigen, but hey...
+        invert_symmetric_3x3(W, &mut Winv); // NOTE: This maybe also analytical with Eigen, but hey...
 
-        let y = -Winv * NtOmega * ( *delta + r );
+        let y = -Winv * nt_omega * ( *delta + r );
 
         // FINALLY, accumulate delta with component in tangent space (delta_n)
         *delta += N*y;
@@ -191,7 +187,8 @@ impl PnpSolver {
 /// Compute the 3D null space (N) and 6D normal space (H) of the constraint Jacobian at a 9D vector r 
 /// (r is not necessarilly a rotation but it must represent an rank-3 matrix )
 /// NOTE: K is lower-triangular, so upper triangle may contain trash (is not filled by the function)...
-fn RowAndNullSpace(
+#[allow(non_snake_case)]
+fn row_and_null_space(
     r: &SMatrix<f64, 9, 1>, 
     H: &mut SMatrix<f64, 9, 6>, // Row space 
     N: &mut SMatrix<f64, 9, 3>, // Null space
