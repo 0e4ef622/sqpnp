@@ -32,10 +32,12 @@ fn main() {
         solver.solve();
         stop = Instant::now();
         println!("SQPnP found {} solution(s)", solver.number_of_solutions());
+        let mut errors = vec![0.; solver.number_of_solutions()];
+        solver.average_squared_projection_errors(&mut errors);
         for i in 0..solver.number_of_solutions() {
             println!("Solution {i}");
             solver.solution_ptr(i).unwrap().print();
-            println!(" Average squared projection error : {:e}", solver.average_squared_projection_errors()[i]);
+            println!(" Average squared projection error : {:e}", errors[i]);
         }
     }
     let duration = stop - start;

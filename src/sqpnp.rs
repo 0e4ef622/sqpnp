@@ -1,4 +1,5 @@
 use nalgebra::SMatrix;
+#[cfg(not(feature = "std"))] use nalgebra::ComplexField;
 
 use crate::{PnpSolver, types::SQPSolution, SQRT3, orthogonality_error, determinant_9x1, invert_symmetric_3x3};
 

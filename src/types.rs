@@ -1,4 +1,4 @@
-use nalgebra::{SMatrix, Const, Vector3};
+use nalgebra::{SMatrix, Vector3};
 
 pub enum OmegaNullspaceMethod {
     Rrqr,
@@ -65,7 +65,9 @@ pub struct SQPSolution {
 }
 
 impl SQPSolution {
+    #[cfg(feature = "std")]
     pub fn print(&self) {
+        use nalgebra::Const;
         println!("r_hat: {:.8}", self.r_hat.reshape_generic(Const::<3>, Const::<3>).transpose());
         println!("t: {:.8}", self.t);
         println!("squared error: {:.5e}", self.sq_error);

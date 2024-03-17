@@ -1,3 +1,6 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))] use nalgebra::ComplexField;
 use nalgebra::{SMatrix, Vector2, Matrix3, Matrix3x1, Const, Vector3};
 use types::{SolverParameters, SQPSolution, OmegaNullspaceMethod};
 
@@ -53,10 +56,13 @@ impl<'input> PnpSolver<'input> {
     }
 
     /// Return average reprojection errors
-    pub fn average_squared_projection_errors(&self) -> Vec<f64> {
-        (0..self.num_solutions).map(|i| {
-            self.average_squared_projection_error(i)
-        }).collect()
+    ///
+    /// Panics if `errors.len() < self.number_of_solutions()`.
+    pub fn average_squared_projection_errors(&self, errors: &mut [f64]) {
+        assert!(errors.len() >= self.num_solutions);
+        for i in 0..self.num_solutions {
+            errors[i] = self.average_squared_projection_error(i)
+        }
     }
 
     /// Constructor (initializes Omega, P and U, s, i.e. the decomposition of Omega)
