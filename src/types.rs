@@ -1,7 +1,8 @@
 use nalgebra::{SMatrix, Vector3};
 
 pub enum OmegaNullspaceMethod {
-    Rrqr,
+    // Rrqr,
+    Cprrqr,
     Svd,
 }
 
@@ -28,7 +29,7 @@ impl SolverParameters {
     pub const DEFAULT_SQP_SQUARED_TOLERANCE: f64 = 1e-10;
     pub const DEFAULT_SQP_DET_THRESHOLD: f64 = 1.001;
     pub const DEFAULT_SQP_MAX_ITERATION: i32 = 15;
-    pub const DEFAULT_OMEGA_NULLSPACE_METHOD: OmegaNullspaceMethod = OmegaNullspaceMethod::Svd; // Originally Rrqr which isn't implemented
+    pub const DEFAULT_OMEGA_NULLSPACE_METHOD: OmegaNullspaceMethod = OmegaNullspaceMethod::Cprrqr; // Originally Rrqr which isn't implemented
     pub const DEFAULT_NEAREST_ROTATION_METHOD: NearestRotationMethod = NearestRotationMethod::Foam;
     pub const DEFAULT_ORTHOGONALITY_SQUARED_ERROR_THRESHOLD: f64 = 1e-8;
     pub const DEFAULT_EQUAL_VECTORS_SQUARED_DIFF: f64 = 1e-10;

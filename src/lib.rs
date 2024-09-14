@@ -135,15 +135,15 @@ impl<'input> PnpSolver<'input> {
             omega[(2, 2)] += w*Z2;
 
             // b. Block (0:2, 6:8) populated by -x*Mi*Mi'. NOTE: Only upper triangle
-            omega[(0, 6)] += -wx*X2; omega[(0, 7)] += -wx*XY; omega[(0, 8)] += -wx*XZ;
-                                     omega[(1, 7)] += -wx*Y2; omega[(1, 8)] += -wx*YZ;
-                                                              omega[(2, 8)] += -wx*Z2;
+            omega[(0, 6)] -= wx*X2; omega[(0, 7)] -= wx*XY; omega[(0, 8)] -= wx*XZ;
+                                    omega[(1, 7)] -= wx*Y2; omega[(1, 8)] -= wx*YZ;
+                                                            omega[(2, 8)] -= wx*Z2;
 
             // c. Block (3:5, 6:8) populated by -y*Mi*Mi'. NOTE: Only upper triangle
-            omega[(3, 6)] += -wy*X2; omega[(3, 7)] += -wy*XY; omega[(3, 8)] += -wy*XZ;
-                                     omega[(4, 7)] += -wy*Y2; omega[(4, 8)] += -wy*YZ;
-                                                              omega[(5, 8)] += -wy*Z2;
-                                                            
+            omega[(3, 6)] -= wy*X2; omega[(3, 7)] -= wy*XY; omega[(3, 8)] -= wy*XZ;
+                                    omega[(4, 7)] -= wy*Y2; omega[(4, 8)] -= wy*YZ;
+                                                            omega[(5, 8)] -= wy*Z2;
+
             // d. Block (6:8, 6:8) populated by (x^2+y^2)*Mi*Mi'. NOTE: Only upper triangle
             omega[(6, 6)] += wsq_norm_m*X2; omega[(6, 7)] += wsq_norm_m*XY; omega[(6, 8)] += wsq_norm_m*XZ;
                                             omega[(7, 7)] += wsq_norm_m*Y2; omega[(7, 8)] += wsq_norm_m*YZ;
@@ -151,11 +151,11 @@ impl<'input> PnpSolver<'input> {
 
             // Accumulating Qi*Ai in QA.
             // Note that certain pairs of elements are equal, so we save some operations by filling them outside the loop
-            QA[(0, 0)] += wX; QA[(0, 1)] += wY; QA[(0, 2)] += wZ;   QA[(0, 6)] += -wx*X; QA[(0, 7)] += -wx*Y; QA[(0, 8)] += -wx*Z;
+            QA[(0, 0)] += wX; QA[(0, 1)] += wY; QA[(0, 2)] += wZ;   QA[(0, 6)] -= wx*X; QA[(0, 7)] -= wx*Y; QA[(0, 8)] -= wx*Z;
             //QA[(1, 3)] += wX; QA[(1, 4)] += wY; QA[(1, 5)] += wZ;
-                                                                    QA[(1, 6)] += -wy*X; QA[(1, 7)] += -wy*Y; QA[(1, 8)] += -wy*Z;
-            
-            //QA[(2, 0)] += -wx*X; QA[(2, 1)] += -wx*Y; QA[(2, 2)] += -wx*Z;     QA[(2, 3)] += -wy*X; QA[(2, 4)] += -wy*Y; QA[(2, 5)] += -wy*Z;
+                                                                    QA[(1, 6)] -= wy*X; QA[(1, 7)] -= wy*Y; QA[(1, 8)] -= wy*Z;
+
+            //QA[(2, 0)] -= wx*X; QA[(2, 1)] -= wx*Y; QA[(2, 2)] -= wx*Z;  QA[(2, 3)] -= wy*X; QA[(2, 4)] -= wy*Y; QA[(2, 5)] -= wy*Z;
             QA[(2, 6)] += wsq_norm_m*X; QA[(2, 7)] += wsq_norm_m*Y; QA[(2, 8)] += wsq_norm_m*Z;
         }
 
@@ -207,14 +207,28 @@ impl<'input> PnpSolver<'input> {
         let U;
         let s;
         match parameters.omega_nullspace_method {
-            OmegaNullspaceMethod::Rrqr => {
-                // Rank revealing QR nullspace computation. This is slightly less accurate compared to SVD but x2 faster
+            // OmegaNullspaceMethod::Rrqr => {
+                // Rank revealing QR nullspace computation with full pivoting.
+                // This is slightly less accurate compared to SVD but x2 faster
                 // Eigen::FullPivHouseholderQR<Eigen::Matrix<double, 9, 9> > rrqr(Omega_);
                 // U_ = rrqr.matrixQ();
                 //
                 // Eigen::Matrix<double, 9, 9> R = rrqr.matrixQR().template triangularView<Eigen::Upper>();
                 // s_ = R.diagonal().array().abs();
-                unimplemented!();
+            // }
+            OmegaNullspaceMethod::Cprrqr => {
+                // Rank revealing QR nullspace computation with column pivoting.
+                // This is potentially less accurate compared to RRQR but faster
+
+                // Eigen::ColPivHouseholderQR<Eigen::Matrix<double, 9, 9> > cprrqr(Omega_);
+                // U_ = cprrqr.householderQ();
+                //
+                // Eigen::Matrix<double, 9, 9> R = cprrqr.matrixR().template triangularView<Eigen::Upper>();
+                // s_ = R.diagonal().array().abs();
+
+                let cprrqr = omega.col_piv_qr();
+                U = cprrqr.q();
+                s = cprrqr.unpack_r().diagonal().abs();
             }
             OmegaNullspaceMethod::Svd => {
                 // SVD-based nullspace computation. This is the most accurate but slowest option
@@ -317,7 +331,7 @@ impl PnpSolver<'_> {
 
 /// Determinant of 3x3 matrix stored as a 9x1 vector in *row-major* order
 fn determinant_9x1(r: &SMatrix<f64, 9, 1>) -> f64 {
-    r[0]*r[4]*r[8] + r[1]*r[5]*r[6] + r[2]*r[3]*r[7] - r[6]*r[4]*r[2] - r[7]*r[5]*r[0] - r[8]*r[3]*r[1]
+    (r[0]*r[4]*r[8] + r[1]*r[5]*r[6] + r[2]*r[3]*r[7]) - (r[6]*r[4]*r[2] + r[7]*r[5]*r[0] + r[8]*r[3]*r[1])
 }
 
 
@@ -400,7 +414,7 @@ fn nearest_rotation_matrix_foam(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 
     let mut adjB = [0.0; 9];
 
     // det(B)
-    detB=B[0]*B[4]*B[8] - B[0]*B[5]*B[7] - B[1]*B[3]*B[8] + B[2]*B[3]*B[7] + B[1]*B[6]*B[5] - B[2]*B[6]*B[4];
+    detB=(B[0]*B[4]*B[8] - B[0]*B[5]*B[7] - B[1]*B[3]*B[8]) + (B[2]*B[3]*B[7] + B[1]*B[6]*B[5] - B[2]*B[6]*B[4]);
     if detB.abs() < 1E-04 { // singular, let SVD handle it
         nearest_rotation_matrix_svd(e, r);
         return;
@@ -412,8 +426,8 @@ fn nearest_rotation_matrix_foam(e: &SMatrix<f64, 9, 1>, r: &mut SMatrix<f64, 9, 
     adjB[6]=B[3]*B[7] - B[4]*B[6]; adjB[7]=B[1]*B[6] - B[0]*B[7]; adjB[8]=B[0]*B[4] - B[1]*B[3];
 
     // ||B||^2, ||adj(B)||^2
-    Bsq=B[0]*B[0]+B[1]*B[1]+B[2]*B[2] + B[3]*B[3]+B[4]*B[4]+B[5]*B[5] + B[6]*B[6]+B[7]*B[7]+B[8]*B[8];
-    adjBsq=adjB[0]*adjB[0]+adjB[1]*adjB[1]+adjB[2]*adjB[2] + adjB[3]*adjB[3]+adjB[4]*adjB[4]+adjB[5]*adjB[5] + adjB[6]*adjB[6]+adjB[7]*adjB[7]+adjB[8]*adjB[8];
+    Bsq=(B[0]*B[0]+B[1]*B[1]+B[2]*B[2]) + (B[3]*B[3]+B[4]*B[4]+B[5]*B[5]) + (B[6]*B[6]+B[7]*B[7]+B[8]*B[8]);
+    adjBsq=(adjB[0]*adjB[0]+adjB[1]*adjB[1]+adjB[2]*adjB[2]) + (adjB[3]*adjB[3]+adjB[4]*adjB[4]+adjB[5]*adjB[5]) + (adjB[6]*adjB[6]+adjB[7]*adjB[7]+adjB[8]*adjB[8]);
 
     // compute l_max with Newton-Raphson from FOAM's characteristic polynomial, i.e. eq.(23) - (26)
     l=0.5*(Bsq + 3.0); // 1/2*(trace(B*B') + trace(eye(3)))
@@ -499,6 +513,6 @@ fn orthogonality_error(a: &SMatrix<f64, 9, 1>) -> f64 {
     let dot_a1a3 = a[0]*a[6] + a[1]*a[7] + a[2]*a[8];
     let dot_a2a3 = a[3]*a[6] + a[4]*a[7] + a[5]*a[8];
 
-    return (sq_norm_a1 - 1.)*(sq_norm_a1 - 1.) + (sq_norm_a2 - 1.)*(sq_norm_a2 - 1.) + (sq_norm_a3 - 1.)*(sq_norm_a3 - 1.) +
-    2.*( dot_a1a2*dot_a1a2 + dot_a1a3*dot_a1a3 + dot_a2a3*dot_a2a3 );
+    return ((sq_norm_a1 - 1.)*(sq_norm_a1 - 1.) + (sq_norm_a2 - 1.)*(sq_norm_a2 - 1.)) + ((sq_norm_a3 - 1.)*(sq_norm_a3 - 1.) +
+    2.*( dot_a1a2*dot_a1a2 + dot_a1a3*dot_a1a3 + dot_a2a3*dot_a2a3) );
 }
