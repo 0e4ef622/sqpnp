@@ -360,8 +360,6 @@ fn row_and_null_space(
 //
 // see http://euler.nmt.edu/~brian/ldlt.html
 //
-// inline static int AxbSolveLDLt3x3(const Eigen::Matrix<double, 3, 3>& A, const Eigen::Matrix<double, 3, 1>& b,
-// Eigen::Matrix<double, 3, 1>& x)
 #[allow(non_snake_case)]
 fn axb_solve_ldlt_3x3(A: &SMatrix<f64, 3, 3>, b: &SMatrix<f64, 3, 1>, x: &mut SMatrix<f64, 3, 1>) -> i32 {
     let mut L = [0.0; 3 * 3];
@@ -387,6 +385,7 @@ fn axb_solve_ldlt_3x3(A: &SMatrix<f64, 3, 3>, b: &SMatrix<f64, 3, 1>, x: &mut SM
     v[0] = L[6] * L[0];
     v[1] = L[7] * L[4];
     L[8] = A[(2, 2)] - L[6] * v[0] - L[7] * v[1];
+    if L[8] < 1E-10 { return 3; }
 
     // Forward solve L*x = b
     x[0] = b[0];
